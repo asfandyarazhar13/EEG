@@ -92,9 +92,9 @@ class CNNLSTMGNNGraphNet(nn.Module):
         
         # Combine outputs
         combined_out = torch.cat((gat_out, wavenet_out), dim=1)
-        
-        # Fully connected layer
-        out = self.fc(combined_out)
+
+        # Fully connected layer with softmax activation
+        out = F.softmax(self.fc(combined_out), dim=1)
         return out
 
 # Define the model
