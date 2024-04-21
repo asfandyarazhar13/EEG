@@ -20,7 +20,7 @@ class BiLSTMModel(nn.Module):
     """
     def __init__(self, input_channels, hidden_dim, num_classes, sequence_length, num_heads, num_encoder_layers, dropout_rate=0.1):
         """
-        Initializes the EEGModel with the given architecture parameters.
+        Initializes the BiLSTM EEG Model with the given architecture parameters.
 
         Args:
             input_channels (int): Number of input EEG channels.
@@ -31,7 +31,7 @@ class BiLSTMModel(nn.Module):
             num_encoder_layers (int): Number of layers in the transformer encoder.
             dropout_rate (float): Dropout rate for regularization.
         """
-        super(EEGModel, self).__init__()
+        super(BiLSTMModel, self).__init__()
 
         # 1D Residual CNN block
         self.residual_cnn = nn.Sequential(
@@ -61,7 +61,7 @@ class BiLSTMModel(nn.Module):
 
     def forward(self, x):
         """
-        Defines the forward pass of the EEGModel.
+        Defines the forward pass of the BiLSTMModel.
 
         Args:
             x (torch.Tensor): The input tensor with shape (batch size, sequence length, input channels).
