@@ -165,7 +165,7 @@ def get_args():
 
 def main():
     args = get_args()
-    model = CustomModel()
+    model = WaveNetModel()
     print("Model initialized with input channels: {} and kernel size: {}".format(args.input_channels, args.kernel_size))
 
 if __name__ == "__main__":
