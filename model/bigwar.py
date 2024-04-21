@@ -49,7 +49,7 @@ class Decoder(nn.Module):
         return probabilities
 
 
-class MultimodalAttentionModel(pl.LightningModule):
+class BigWarModel(pl.LightningModule):
     """
     PyTorch Lightning module for a multimodal architecture that processes inputs from
     different model backbones and combines their features using attention pooling
@@ -172,7 +172,7 @@ def create_model_from_args(args):
         args: Command-line arguments.
 
     Returns:
-        MultimodalAttentionModel: The instantiated model.
+        BigWarModel: The instantiated model.
     """
     input_dims = {
         'bilstm': [args.bilstm_input_channels, args.hidden_dim, args.num_classes],
@@ -181,7 +181,7 @@ def create_model_from_args(args):
         'wavenet': [args.wavenet_input_channels, args.kernel_size]
     }
 
-    model = MultimodalAttentionModel(
+    model = BigWarModel(
         input_dims=input_dims,
         hidden_dim=args.hidden_dim,
         num_classes=args.num_classes,
