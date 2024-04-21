@@ -78,8 +78,11 @@ class BiLSTMModel(nn.Module):
         # Add positional encodings
         lstm_out += self.positional_encoding[:, :lstm_out.size(1)]
 
+        # Reshape lstm_out to (B, 18, 256)
+        reshaped_lstm_out = lstm_out.view(-1, 18, 256)
+
         # Apply transformer encoder (attention layers)
-        attention_out = self.transformer_encoder(lstm_out)
+        attention_out = self.transformer_encoder(reshaped_lstm_out)
 
         # Fully connected layer after attention
         fc_out = F.relu(self.fc(attention_out.mean(dim=1)))
