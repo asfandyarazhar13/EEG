@@ -6,8 +6,8 @@ from argparse import ArgumentParser
 from torch.utils.data import DataLoader
 
 from modules.bilstm import BiLSTMModel
-from modules.cnn import CNNModel
-from modules.gnn import GNN
+from modules.cnn import ResNetModel
+from modules.gnn import GNNModel
 from modules.wavenet import WaveNetModel
 
 
@@ -77,8 +77,8 @@ class BigWarModel(pl.LightningModule):
         self.save_hyperparameters()
 
         self.bilstm_model = BiLSTMModel(*input_dims['bilstm'], sequence_length, num_heads, num_encoder_layers, dropout_rate)
-        self.cnn_model = CNNModel(*input_dims['cnn'], num_heads, num_encoder_layers, dropout_rate)
-        self.gnn_model = GNN(*input_dims['gnn'])
+        self.resnet_model = ResNetModel(*input_dims['cnn'], num_heads, num_encoder_layers, dropout_rate)
+        self.gnn_model = GNNModel(*input_dims['gnn'])
         self.wavenet_model = WaveNetModel(*input_dims['wavenet'])
 
         self.concat_dim = 30
@@ -116,7 +116,7 @@ class BigWarModel(pl.LightningModule):
         """
         # Process inputs through each model's backbone
         bilstm_output = self.bilstm_model(bilstm_input)
-        cnn_output = self.cnn_model(cnn_input)
+        cnn_output = self.resnet_model(cnn_input)
         gnn_output = self.gnn_model(gnn_input)
         wavenet_output = self.wavenet_model(wavenet_input)
 
@@ -145,7 +145,7 @@ class BigWarModel(pl.LightningModule):
         Returns:
             torch.Tensor: The computed loss for the batch.
         """
-        bilstm_input, cnn_input, gnn_input, wavenet_input, labels = batch
+        bilstm_input, resnet_input, gnn_input, wavenet_input, labels = batch
         probabilities = self.forward(bilstm_input, cnn_input, gnn_input, wavenet_input)
 
         # Compute KLD loss
@@ -176,7 +176,7 @@ def create_model_from_args(args):
     """
     input_dims = {
         'bilstm': [args.bilstm_input_channels, args.hidden_dim, args.num_classes],
-        'cnn': [args.cnn_num_channels, args.num_classes, args.num_heads, args.num_encoder_layers, args.dropout_rate],
+        'resnet': [args.resnet_num_channels, args.num_classes, args.num_heads, args.num_encoder_layers, args.dropout_rate],
         'gnn': [args.gnn_in_channels, args.gnn_num_conv_layers, args.gnn_hid_channels, args.num_classes],
         'wavenet': [args.wavenet_input_channels, args.kernel_size]
     }
@@ -202,7 +202,7 @@ def main():
     # Add model configuration arguments
     parser = ArgumentParser()
     parser.add_argument('--bilstm_input_channels', type=int, default=18, help='Input channels for BiLSTM')
-    parser.add_argument('--cnn_num_channels', type=int, default=1, help='Number of channels for CNN')
+    parser.add_argument('--resnet_num_channels', type=int, default=1, help='Number of channels for ResNet')
     parser.add_argument('--gnn_in_channels', type=int, default=10000, help='Input channels for GNN')
     parser.add_argument('--wavenet_input_channels', type=int, default=1, help='Input channels for WaveNet')
     parser.add_argument('--hidden_dim', type=int, default=256, help='Hidden dimension for the models')
