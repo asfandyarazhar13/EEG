@@ -1,132 +1,139 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn import TransformerEncoder, TransformerEncoderLayer
-import argparse
 
-class BiLSTMModel(nn.Module):
-    """
-    EEG signal processing model using a 1D residual CNN, a bidirectional LSTM,
-    and a transformer attention mechanism followed by a decoder with temperature scaling.
+from layers import ResBlock1D, NodeAttention, BiLSTMBlock
+
+
+class BiLSTMModule(nn.Module):
+    """Module comprising of a projection layer, downsampling using residual blocks, and a BiLSTM block for embedding.
 
     Attributes:
-        residual_cnn (nn.Sequential): A sequence of 1D convolutional layers for feature extraction.
-        lstm (nn.LSTM): A bidirectional LSTM for temporal sequence processing.
-        positional_encoding (nn.Parameter): Learned positional encodings for sequence order information.
-        transformer_encoder (nn.TransformerEncoder): Transformer encoder for attention mechanism.
-        fc (nn.Linear): Fully connected layer to process attention outputs.
-        decoder_logits (nn.Linear): Linear layer to produce logits for classification.
-        decoder_temperature (nn.Linear): Linear layer to compute temperature for scaling logits.
+        layers (list): A list specifying the number of features in each block.
+        projection (nn.Conv1d): Initial convolution layer to project input into a higher dimensional space.
+        downsample (nn.Sequential): Sequential model containing several residual blocks for downsampling.
+        temporal_embed (BiLSTMBlock): BiLSTM block to capture temporal dependencies.
     """
-    def __init__(self, input_channels, hidden_dim, num_classes, sequence_length, num_heads, num_encoder_layers, dropout_rate=0.1):
-        """
-        Initializes the BiLSTM EEG Model with the given architecture parameters.
+    layers = [
+        16,
+        24,
+        32,
+        48,
+        64,
+        96,
+        256
+    ]
 
-        Args:
-            input_channels (int): Number of input EEG channels.
-            hidden_dim (int): Hidden dimension size for the internal layers.
-            num_classes (int): Number of classes for the output layer.
-            sequence_length (int): The length of the input sequences.
-            num_heads (int): Number of attention heads in the transformer encoder.
-            num_encoder_layers (int): Number of layers in the transformer encoder.
-            dropout_rate (float): Dropout rate for regularization.
-        """
-        super(BiLSTMModel, self).__init__()
+    def __init__(self, in_channels: int = 1, scale: int = 1) -> None:
+        """Initializes the BiLSTMModule with optional scaling of feature dimensions."""
+        super(BiLSTMModule, self).__init__()
 
-        # 1D Residual CNN block
-        self.residual_cnn = nn.Sequential(
-            nn.Conv1d(input_channels, hidden_dim, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Conv1d(hidden_dim, hidden_dim, kernel_size=3, stride=1, padding=1)
+        self.projection = nn.Conv1d(
+            in_channels=in_channels, 
+            out_channels=self.layers[0] * scale, 
+            kernel_size=5,
+            padding=2
+        )
+        self.downsample = nn.Sequential(
+            ResBlock1D(self.layers[0] * scale, self.layers[1] * scale, kernel_size=5, padding=2),
+            ResBlock1D(self.layers[1] * scale, self.layers[2] * scale, kernel_size=5, padding=2),
+            ResBlock1D(self.layers[2] * scale, self.layers[3] * scale, kernel_size=3, padding=1),
+            ResBlock1D(self.layers[3] * scale, self.layers[4] * scale, kernel_size=3, padding=1),
+            ResBlock1D(self.layers[4] * scale, self.layers[5] * scale, kernel_size=3, padding=1)
+        )
+        self.temporal_embed = BiLSTMBlock(
+            input_size=self.layers[5] * scale, 
+            embed_dim=self.layers[6] * scale
         )
 
-        # Bidirectional LSTM for temporal sequence processing
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim // 2, batch_first=True, bidirectional=True)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Defines the forward pass of the BiLSTMModule."""
+        x = self.projection(x)
+        x = self.downsample(x)
+        x = self.temporal_embed(x)
+        return x
 
-        # Positional encoding for attention layer
-        self.positional_encoding = nn.Parameter(torch.zeros(1, sequence_length, hidden_dim))
 
-        # Transformer Encoder layers for attention
-        encoder_layers = TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads, dropout=dropout_rate)
-        self.transformer_encoder = TransformerEncoder(encoder_layer=encoder_layers, num_layers=num_encoder_layers)
+class BiLSTMModel(nn.Module):
+    """Complete BiLSTM Model integrating module, node attention, and output layers.
 
-        # Fully connected layer
-        self.fc = nn.Linear(hidden_dim, hidden_dim)
+    Attributes:
+        encoder (BiLSTMModule): Module for initial feature extraction and embedding.
+        signal_dim (int): Dimension of the signal output from the encoder.
+        embed_dim (int): Embedding dimension used for node attention and output.
+        node_attention (NodeAttention): Attention mechanism to refine features.
+        pool_factor (nn.Linear): Linear layer to aggregate features.
+        decoder (nn.Linear): Linear layer for classification.
+        temperature (nn.Sequential): Network to learn a temperature scaling for softmax.
+    """
+    def __init__(self, in_channels: int = 1, scale: int = 1) -> None:
+        """Initializes the BiLSTMModel with optional scaling of feature dimensions."""
+        super(BiLSTMModel, self).__init__()
 
-        # Decoder layers
-        self.decoder_logits = nn.Linear(hidden_dim, num_classes)
-        self.decoder_temperature = nn.Linear(hidden_dim, 1)
+        self.encoder = BiLSTMModule(in_channels, scale)
+        self.signal_dim = self.encoder.layers[-1] * scale
+        self.embed_dim = self.signal_dim
 
-    def forward(self, x):
-        """
-        Defines the forward pass of the BiLSTMModel.
+        self.node_attention = NodeAttention(
+            input_size=self.signal_dim, embed_dim=self.signal_dim
+        )
+        self.pool_factor = nn.Linear(self.signal_dim, 1)
+
+        self.decoder = nn.Linear(self.embed_dim, 6)
+        self.temperature = nn.Sequential(
+            nn.Linear(self.embed_dim, 1),
+            nn.Softplus()
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Defines the forward pass of the BiLSTMModel."""
+        x = self.forward_embedding(x)
+        x = self.forward_head(x)
+
+        return x
+
+    def forward_head(self, x: torch.Tensor, pre_logits: bool = False) -> torch.Tensor:
+        """Processes features through attention and pooling to prepare for output.
 
         Args:
-            x (torch.Tensor): The input tensor with shape (batch size, sequence length, input channels).
+            x (torch.Tensor): Input tensor after initial embedding.
+            pre_logits (bool): If True, return features before applying final classification layer.
 
         Returns:
-            torch.Tensor: The output probabilities after softmax with temperature scaling.
+            torch.Tensor: The processed tensor, either pre-logits or final predictions.
         """
-        # Apply residual CNN and add skip connection
-        cnn_out = self.residual_cnn(x.transpose(1, 2)) + x.transpose(1, 2)
+        b = x.shape[0]
 
-        # LSTM layer expects input of shape (batch, seq, feature)
-        lstm_out, _ = self.lstm(cnn_out)
+        # Processing relationships in each node of the montage
+        x = self.node_attention(x)
+        pf = F.softmax(self.pool_factor(x), dim=1)
+        x = torch.sum(x * pf, dim=1).view(b, -1)
 
-        # Add positional encodings
-        lstm_out += self.positional_encoding[:, :lstm_out.size(1)]
+        if pre_logits:
+            return x
 
-        # Reshape lstm_out to (B, 18, 256)
-        reshaped_lstm_out = lstm_out.view(-1, 18, 256)
+        # Applying temperature scaling to logits
+        t = self.temperature(x)
+        logits = self.decoder(x)
+        pred = F.log_softmax(logits / t, dim=-1)
 
-        # Apply transformer encoder (attention layers)
-        attention_out = self.transformer_encoder(reshaped_lstm_out)
+        return pred
 
-        # Fully connected layer after attention
-        fc_out = F.relu(self.fc(attention_out.mean(dim=1)))
+    def forward_embedding(self, x: torch.Tensor) -> torch.Tensor:
+        """Embeds input using the encoder and reshapes for further processing.
 
-        # Decode into logits and temperature
-        logits = self.decoder_logits(fc_out)
-        temperature = torch.exp(self.decoder_temperature(fc_out))  # ensuring temperature is positive
+        Args:
+            x (torch.Tensor): Input tensor.
 
-        # Apply temperature scaling to logits
-        scaled_logits = logits / temperature
+        Returns:
+            torch.Tensor: The reshaped tensor after encoding.
+        """
+        b, c, l = x.shape
+        x = x[:, :c-1]
+        x = x.view(b, (c - 1), -1)
+        x = x.reshape(b * (c - 1), 1, -1)
 
-        # Softmax for probabilities
-        probabilities = F.softmax(scaled_logits, dim=1)
-
-        return probabilities
-
-def parse_arguments():
-    """
-    Parses command line arguments for the EEG signal processing model.
-    """
-    parser = argparse.ArgumentParser(description='BiLSTM Model Configuration')
-    parser.add_argument('--input_channels', type=int, default=18, help='Number of input EEG channels')
-    parser.add_argument('--hidden_dim', type=int, default=256, help='Hidden dimension size for internal layers')
-    parser.add_argument('--num_classes', type=int, default=6, help='Number of classes for output layer')
-    parser.add_argument('--sequence_length', type=int, default=100, help='Length of the input sequences')
-    parser.add_argument('--num_heads', type=int, default=2, help='Number of attention heads in transformer encoder')
-    parser.add_argument('--num_encoder_layers', type=int, default=2, help='Number of layers in transformer encoder')
-    parser.add_argument('--dropout_rate', type=float, default=0.1, help='Dropout rate for regularization')
-    return parser.parse_args()
-
-def main():
-    # Parse the command line arguments
-    args = parse_arguments()
-
-    # Instantiate the model with the provided arguments
-    model = BiLSTMModel(
-        input_channels=args.input_channels,
-        hidden_dim=args.hidden_dim,
-        num_classes=args.num_classes,
-        sequence_length=args.sequence_length,
-        num_heads=args.num_heads,
-        num_encoder_layers=args.num_encoder_layers,
-        dropout_rate=args.dropout_rate
-    )
-
-if __name__ == '__main__':
-    main()
+        # Downsample and embed
+        x = self.encoder(x)
+        x = x.view(b, c - 1, -1)
+        return x
