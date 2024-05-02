@@ -1,66 +1,8 @@
 import torch
 import torch.nn as nn
-import argparse
 
-class Wave_Block(nn.Module):
-    """
-    A building block for the WaveNet architecture utilizing dilated convolutions.
+from layers import WaveBlock
 
-    Attributes:
-        num_rates (int): Number of dilation levels.
-        convs (nn.ModuleList): List of convolutional layers.
-        filter_convs (nn.ModuleList): List of dilated convolutional layers for filter.
-        gate_convs (nn.ModuleList): List of dilated convolutional layers for gate.
-    """
-    def __init__(self, in_channels: int, out_channels: int, dilation_rates: int, kernel_size: int = 3):
-        """
-        Initializes the Wave_Block module.
-
-        Args:
-            in_channels (int): Number of input channels.
-            out_channels (int): Number of output channels.
-            dilation_rates (int): Number of dilation levels.
-            kernel_size (int): Size of the kernel for convolution operations.
-        """
-        super(Wave_Block, self).__init__()
-        self.num_rates = dilation_rates
-        self.convs = nn.ModuleList([nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=True)])
-        dilation_rates = [2 ** i for i in range(dilation_rates)]
-
-        for dilation_rate in dilation_rates:
-            self.filter_convs.append(
-                nn.Conv1d(out_channels, out_channels, kernel_size=kernel_size,
-                          padding=int((dilation_rate * (kernel_size - 1)) / 2), dilation=dilation_rate))
-            self.gate_convs.append(
-                nn.Conv1d(out_channels, out_channels, kernel_size=kernel_size,
-                          padding=int((dilation_rate * (kernel_size - 1)) / 2), dilation=dilation_rate))
-            self.convs.append(nn.Conv1d(out_channels, out_channels, kernel_size=1, bias=True))
-
-        self.initialize_weights()
-
-    def initialize_weights(self):
-        """Initializes weights of the convolution layers using Xavier uniform distribution."""
-        for conv in self.convs:
-            nn.init.xavier_uniform_(conv.weight, gain=nn.init.calculate_gain('relu'))
-            nn.init.zeros_(conv.bias)
-
-        for filter_conv, gate_conv in zip(self.filter_convs, self.gate_convs):
-            nn.init.xavier_uniform_(filter_conv.weight, gain=nn.init.calculate_gain('relu'))
-            nn.init.zeros_(filter_conv.bias)
-            nn.init.xavier_uniform_(gate_conv.weight, gain=nn.init.calculate_gain('relu'))
-            nn.init.zeros_(gate_conv.bias)
-
-    def forward(self, x):
-        """Forward pass of the Wave_Block."""
-        x = self.convs[0](x)
-        res = x
-        for i in range(self.num_rates):
-            tanh_out = torch.tanh(self.filter_convs[i](x))
-            sigmoid_out = torch.sigmoid(self.gate_convs[i](x))
-            x = tanh_out * sigmoid_out
-            x = self.convs[i + 1](x)
-            res += x
-        return res
 
 class WaveNet(nn.Module):
     """
@@ -79,10 +21,10 @@ class WaveNet(nn.Module):
         """
         super(WaveNet, self).__init__()
         self.model = nn.Sequential(
-            Wave_Block(input_channels, 8, 12, kernel_size),
-            Wave_Block(8, 16, 8, kernel_size),
-            Wave_Block(16, 32, 4, kernel_size),
-            Wave_Block(32, 64, 1, kernel_size)
+            WaveBlock(input_channels, 8, 12, kernel_size),
+            WaveBlock(8, 16, 8, kernel_size),
+            WaveBlock(16, 32, 4, kernel_size),
+            WaveBlock(32, 64, 1, kernel_size)
         )
 
     def forward(self, x):
@@ -102,7 +44,7 @@ class WaveNetModel(nn.Module):
         head (nn.Sequential): Sequential container for the final classification layers.
     """
     def __init__(self):
-        """Initializes the CustomModel."""
+        """Initializes the WaveNetModel."""
         super(CustomModel, self).__init__()
         self.model = WaveNet()
         self.global_avg_pooling = nn.AdaptiveAvgPool1d(1)
@@ -116,7 +58,7 @@ class WaveNetModel(nn.Module):
         )
 
     def forward(self, x):
-        """Forward pass of the CustomModel."""
+        """Forward pass of the WaveNetModel."""
         # The following lines process different channels of the input and combine their results.
         x1 = self.model(x[:, :, 0:1])
         x1 = self.global_avg_pooling(x1)
@@ -154,19 +96,3 @@ class WaveNetModel(nn.Module):
         y = self.head(y)
 
         return y
-
-def get_args():
-    """Parses command-line arguments."""
-    parser = argparse.ArgumentParser(description="Process some integers.")
-    parser.add_argument('--input_channels', type=int, default=1, help='Number of input channels')
-    parser.add_argument('--kernel_size', type=int, default=3, help='Kernel size for convolutions')
-    args = parser.parse_args()
-    return args
-
-def main():
-    args = get_args()
-    model = WaveNetModel()
-    print("Model initialized with input channels: {} and kernel size: {}".format(args.input_channels, args.kernel_size))
-
-if __name__ == "__main__":
-    main()
