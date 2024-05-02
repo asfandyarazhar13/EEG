@@ -14,15 +14,7 @@ class BiLSTMModule(nn.Module):
         downsample (nn.Sequential): Sequential model containing several residual blocks for downsampling.
         temporal_embed (BiLSTMBlock): BiLSTM block to capture temporal dependencies.
     """
-    layers = [
-        16,
-        24,
-        32,
-        48,
-        64,
-        96,
-        256
-    ]
+    layers = [16, 24, 32, 48, 64, 96, 256]
 
     def __init__(self, in_channels: int = 1, scale: int = 1) -> None:
         """Initializes the BiLSTMModule with optional scaling of feature dimensions."""
