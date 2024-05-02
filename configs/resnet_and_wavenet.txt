@@ -6,7 +6,7 @@ scheduler:
   _type_: CosineAnnealingLR
 
 model:
-  _type_: resnet
+  _type_: resnet #wavenet
   in_channels: 1
 
 trainer:
