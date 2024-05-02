@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 from torch.utils.data import DataLoader
 
 from modules.bilstm import BiLSTMModel
-from modules.cnn import ResNetModel
+from modules.resnet import ResNetModel
 from modules.gnn import GNNModel
 from modules.wavenet import WaveNetModel
 
