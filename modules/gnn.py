@@ -1,83 +1,75 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GATConv, global_mean_pool
-import argparse
 
-class GNN(torch.nn.Module):
-    """
-    Graph Neural Network (GNN) using Graph Attention Network (GAT) convolution layers.
+class GNNModule(nn.Module):
+    """Graph Neural Network Module using GATConv layers for EEG data analysis.
+
+    This module uses multiple Graph Attention Network (GAT) layers to capture and enhance signal correlations and feature extraction.
 
     Attributes:
-        conv1 (GATConv): First GAT convolution layer.
-        convs (torch.nn.ModuleList): List of subsequent GAT convolution layers.
-        lin1 (torch.nn.Linear): First linear transformation layer.
-        lin2 (torch.nn.Linear): Second linear transformation layer for output.
+        gat_layers (nn.ModuleList): List of GATConv layers.
+        activation_layers (nn.ModuleList): List of ReLU activation layers.
+        global_pool (function): Global average pooling function.
     """
-    def __init__(self, in_channels=10_000, num_conv_layers=3, hid_channels=32, num_classes=6):
-        """
-        Initializes the GNN model with configurable parameters.
+    def __init__(self, num_features: int, num_classes: int, num_layers: int = 3) -> None:
+        """Initializes the GNNModule with specified number of features, classes, and layers."""
+        super(GNNModule, self).__init__()
 
-        Args:
-            in_channels (int): Number of input channels.
-            num_conv_layers (int): Number of GAT convolution layers.
-            hid_channels (int): Number of hidden channels for each GATConv layer.
-            num_classes (int): Number of classes for classification.
-        """
-        super().__init__()
-        self.conv1 = GATConv(in_channels, hid_channels)
-        self.convs = torch.nn.ModuleList()
-        for _ in range(num_conv_layers - 1):
-            self.convs.append(GATConv(hid_channels, hid_channels))
-        self.lin1 = torch.nn.Linear(hid_channels, hid_channels)
-        self.lin2 = torch.nn.Linear(hid_channels, num_classes)
+        self.gat_layers = nn.ModuleList()
+        self.activation_layers = nn.ModuleList()
 
-    def reset_parameters(self):
-        """Resets all the parameters of the GNN."""
-        self.conv1.reset_parameters()
-        for conv in self.convs:
-            conv.reset_parameters()
-        self.lin1.reset_parameters()
-        self.lin2.reset_parameters()
+        # Initialize GAT layers and ReLU activations
+        for i in range(num_layers):
+            out_channels = num_features * 2 if i < num_layers - 1 else num_classes
+            self.gat_layers.append(GATConv(num_features, out_channels))
+            self.activation_layers.append(nn.ReLU())
+            num_features = out_channels
 
-    def forward(self, data):
-        """
-        Forward pass of the GNN.
+        self.global_pool = global_mean_pool
 
-        Args:
-            data: Input data containing features, edge index, and batch index.
-
-        Returns:
-            Output of the model after processing input data.
-        """
-        x, edge_index, batch = data.x, data.edge_index, data.batch
-        x = F.relu(self.conv1(x, edge_index))
-        for conv in self.convs:
-            x = F.relu(conv(x, edge_index))
-        x = global_mean_pool(x, batch)
-        x = F.relu(self.lin1(x))
-        x = F.dropout(x, p=0.5, training=self.training)
-        x = self.lin2(x)
+    def forward(self, x, edge_index, batch_index) -> torch.Tensor:
+        """Defines the forward pass of the GNNModule."""
+        for gat_layer, activation in zip(self.gat_layers, self.activation_layers):
+            x = gat_layer(x, edge_index)
+            x = activation(x)
+        
+        # Apply global average pooling
+        x = self.global_pool(x, batch_index)
         return x
 
-def get_args():
-    """Parses command-line arguments."""
-    parser = argparse.ArgumentParser(description="Configure GNN model parameters.")
-    parser.add_argument('--in_channels', type=int, default=10_000, help='Number of input channels')
-    parser.add_argument('--num_conv_layers', type=int, default=3, help='Number of GAT convolution layers')
-    parser.add_argument('--hid_channels', type=int, default=32, help='Number of hidden channels')
-    parser.add_argument('--num_classes', type=int, default=6, help='Number of classes for classification')
-    args = parser.parse_args()
-    return args
+class GNN(nn.Module):
+    """Graph Neural Network for classifying EEG data.
 
-def main():
-    args = get_args()
-    model = GNN(
-        in_channels=args.in_channels,
-        num_conv_layers=args.num_conv_layers,
-        hid_channels=args.hid_channels,
-        num_classes=args.num_classes
-    )
-    print("Model initialized with the following parameters:", args)
+    This network uses a GNN module followed by dense layers, dropout for regularization, and a softmax layer for classification.
 
-if __name__ == "__main__":
-    main()
+    Attributes:
+        gnn_module (GNNModule): The GNN module for feature extraction.
+        dense1 (nn.Linear): First dense layer.
+        dropout (nn.Dropout): Dropout layer for regularization.
+        dense2 (nn.Linear): Second dense layer.
+        softmax (nn.Softmax): Softmax layer for classification.
+    """
+    def __init__(self, num_features: int, num_classes: int, num_layers: int = 3) -> None:
+        """Initializes the GNN with specified number of features, classes, and layers."""
+        super(GNN, self).__init__()
+
+        self.gnn_module = GNNModule(num_features, num_classes, num_layers)
+        self.dense1 = nn.Linear(num_classes, num_classes * 2)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.5)
+        self.dense2 = nn.Linear(num_classes * 2, num_classes)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, data) -> torch.Tensor:
+        """Defines the forward pass of the GNN."""
+        x = self.gnn_module(data.x, data.edge_index, data.batch)
+
+        x = self.dense1(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        x = self.dense2(x)
+        x = self.softmax(x)
+
+        return x
