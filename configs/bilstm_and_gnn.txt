@@ -1,0 +1,25 @@
+optimizer:
+  _type_: Adam
+  lr: 0.0001
+
+scheduler:
+  _type_: CosineAnnealingLR
+
+model:
+  _type_: bilstm #gnn
+  in_channels: 1
+
+trainer:
+  device: cuda
+  min_epochs: 0
+  max_epochs: 100
+  grad_accum_steps: 1
+  check_val_every_n_epochs: 1
+  log_every_n_steps: 1
+
+data:
+  n_folds: 5
+  count_type: all
+  batch_size: 128
+  shuffle: true
+  num_workers: -1
